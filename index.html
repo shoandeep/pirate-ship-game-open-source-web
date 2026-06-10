@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a3d62">
+<title>Sea Raiders — open source pirate ship battles</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- ===== HUD (in game) ===== -->
+<div id="hud" class="hidden">
+  <div id="hud-top-left">
+    <div class="bar-wrap">
+      <div id="hp-bar" class="bar"><div id="hp-fill"></div></div>
+      <span id="hp-text">100</span>
+    </div>
+    <div id="gold-row">🪙 <span id="gold-text">0</span></div>
+    <div id="wave-row">⚔ Wave <span id="wave-text">1</span></div>
+    <div id="power-row"></div>
+  </div>
+  <div id="announce"></div>
+  <div id="leaderboard" class="hidden"></div>
+
+  <!-- touch controls -->
+  <div id="btn-fire" class="touch-btn">🔥<small>FIRE</small></div>
+  <div id="btn-brace" class="touch-btn">🛡<small>BRACE</small><div class="cd-overlay"></div></div>
+</div>
+
+<!-- ===== Main menu ===== -->
+<div id="menu" class="screen">
+  <h1>SEA&nbsp;RAIDERS</h1>
+  <p class="tagline">hoist the sails, light the fuses</p>
+  <div class="menu-buttons">
+    <button id="btn-single" class="big-btn">⛵ Set Sail (Solo)</button>
+    <button id="btn-multi" class="big-btn">🌊 Multiplayer</button>
+  </div>
+  <div id="multi-form" class="hidden">
+    <input id="player-name" type="text" maxlength="12" placeholder="Captain name" autocomplete="off">
+    <input id="server-url" type="text" placeholder="ws://localhost:8080" autocomplete="off">
+    <button id="btn-connect" class="big-btn">Join the Sea</button>
+    <p id="net-status"></p>
+  </div>
+  <p class="howto">
+    <b>Thumb / Mouse:</b> hold &amp; drag anywhere on the left to steer ·
+    <b>FIRE</b> unleashes a broadside · <b>BRACE</b> halves damage for a moment<br>
+    <b>Keyboard:</b> WASD / arrows to sail · SPACE fire · SHIFT brace
+  </p>
+  <p class="credits">100% open source · MIT license</p>
+</div>
+
+<!-- ===== Shop (between waves) ===== -->
+<div id="shop" class="screen hidden">
+  <h2>⚓ Port of Call</h2>
+  <p>Wave cleared! Spend yer gold, captain. <span class="shop-gold">🪙 <span id="shop-gold-text">0</span></span></p>
+  <div id="shop-items"></div>
+  <button id="btn-next-wave" class="big-btn">⛵ Next Wave</button>
+</div>
+
+<!-- ===== Game over ===== -->
+<div id="gameover" class="screen hidden">
+  <h2>☠ Sunk to the Depths</h2>
+  <p id="gameover-stats"></p>
+  <button id="btn-restart" class="big-btn">⚓ Sail Again</button>
+  <button id="btn-tomenu" class="big-btn ghost">Main Menu</button>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
