@@ -26,8 +26,21 @@ export class EnemyAI {
     this.wanderTimer = 0;
     this.fleeing = false;
 
+    // detection: until a captain spots you, they patrol blind and stay off
+    // your map. Once detected, they hunt you anywhere and the game may react.
+    this.detected = false;
+    this.justDetected = false;
+
     this.sightRange = 620;
     this.broadsideRange = this.ship.stats.range * 0.8;
+  }
+
+  /** mark this captain as aware of the player (spotted, or alerted by an ally) */
+  markDetected(alertSecs = 1.4) {
+    if (this.detected) return;
+    this.detected = true;
+    this.justDetected = true;
+    this.ship.alert = alertSecs;
   }
 
   /** returns a control object for the ship + may push cannonballs into `out` */
@@ -47,9 +60,12 @@ export class EnemyAI {
       this.fleeing = true;
     }
 
+    if (d < this.sightRange) this.markDetected();
+
     if (this.fleeing) {
       this.state = 'flee';
-    } else if (d < this.sightRange) {
+    } else if (this.detected) {
+      // an aware captain hunts you across the whole sea
       this.state = d < this.broadsideRange ? 'broadside' : 'chase';
     } else {
       this.state = 'patrol';

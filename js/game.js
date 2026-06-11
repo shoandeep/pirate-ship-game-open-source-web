@@ -1,8 +1,14 @@
 // Sea Raiders — game world: waves, combat, loot, camera, shop, multiplayer wiring (MIT)
 import { TAU, clamp, lerp, dist, angleTo, angleDiff, rand, pick } from './utils.js';
-import { Ship, drawShip, Loot, LOOT_KINDS, Rock, Particles } from './entities.js';
+import {
+  Ship, Loot, LOOT_KINDS, Rock, Barrel, BARREL_RADIUS, BARREL_DAMAGE, Particles,
+} from './entities.js';
 import { EnemyAI, waveSpec } from './enemy.js';
-import { drawWater, drawWorldEdge } from './water.js';
+import { drawWater } from './water.js';
+import {
+  TILT_C, drawShip3D, drawRock3D, drawLoot3D, drawBarrel3D, drawBall3D,
+  drawParticles, drawCloudBorder, Gulls,
+} from './render3d.js';
 
 export const WORLD_SIZE = 4200;
 
@@ -92,10 +98,13 @@ export class Game {
     this.enemies = [];
     this.balls = [];
     this.loot = [];
+    this.barrels = [];
     this.powerups = { rapid: 0, spread: 0 };
     this.particles = new Particles();
+    this.gulls = new Gulls(4);
+    this.spotted = false;     // has any enemy detected the player this wave?
     this.cam.x = this.player.x - this.canvas.width / 2;
-    this.cam.y = this.player.y - this.canvas.height / 2;
+    this.cam.y = this.player.y - (this.canvas.height / 2) / TILT_C;
     this.respawnTimer = 0;
     this.waveDelay = 0;
 
@@ -107,10 +116,24 @@ export class Game {
       if (dist(x, y, WORLD_SIZE / 2, WORLD_SIZE / 2) < 500) continue;
       this.rocks.push(new Rock(x, y, rand(35, 95)));
     }
+
+    this._spawnBarrels(8);
+  }
+
+  _spawnBarrels(target) {
+    let guard = 60;
+    while (this.barrels.length < target && guard-- > 0) {
+      const x = rand(300, WORLD_SIZE - 300);
+      const y = rand(300, WORLD_SIZE - 300);
+      if (dist(x, y, this.player.x, this.player.y) < 350) continue;
+      if (this.rocks.some((r) => dist(x, y, r.x, r.y) < r.r + 70)) continue;
+      this.barrels.push(new Barrel(x, y));
+    }
   }
 
   _nextWave() {
     this.wave++;
+    this.spotted = false;
     const spec = waveSpec(this.wave);
     for (const type of spec.ships) {
       // spawn around the player but outside sight
@@ -120,8 +143,49 @@ export class Game {
       const y = clamp(this.player.y + Math.sin(a) * d, 150, WORLD_SIZE - 150);
       this.enemies.push(new EnemyAI(x, y, type, spec.scale));
     }
+    this._spawnBarrels(8);
     this.ui.announce(spec.boss ? `⚔ WAVE ${this.wave} — A GALLEON LOOMS!` : `⚔ WAVE ${this.wave}`);
     this.ui.setWave(this.wave);
+  }
+
+  /**
+   * Called the moment an enemy captain spots the player: nearby allies are
+   * alerted, and the first sighting of each wave whistles up reinforcements
+   * that sail in out of the cloud wall.
+   */
+  _onPlayerSpotted(spotter) {
+    for (const e of this.enemies) {
+      if (e !== spotter && !e.detected &&
+          dist(e.ship.x, e.ship.y, spotter.ship.x, spotter.ship.y) < 620) {
+        e.markDetected(0.9);
+      }
+    }
+
+    if (this.spotted) return;
+    this.spotted = true;
+    this.ui.announce('⚠ Spotted! Reinforcements inbound…', 2.6);
+
+    const count = 1 + Math.min(2, Math.floor(this.wave / 4));
+    const scale = 1 + this.wave * 0.06;
+    for (let i = 0; i < count; i++) {
+      // emerge from the cloud border nearest the player
+      const p = this.player;
+      const edges = [
+        { x: 90, y: p.y }, { x: WORLD_SIZE - 90, y: p.y },
+        { x: p.x, y: 90 }, { x: p.x, y: WORLD_SIZE - 90 },
+      ];
+      let best = edges[0], bd = Infinity;
+      for (const ed of edges) {
+        const d = dist(ed.x, ed.y, p.x, p.y);
+        if (d < bd) { bd = d; best = ed; }
+      }
+      const e = new EnemyAI(
+        clamp(best.x + rand(-250, 250), 90, WORLD_SIZE - 90),
+        clamp(best.y + rand(-250, 250), 90, WORLD_SIZE - 90),
+        'sloop', scale);
+      e.markDetected(2);
+      this.enemies.push(e);
+    }
   }
 
   // ---------------------------------------------------------- update
@@ -163,6 +227,10 @@ export class Game {
           this.balls.push(...out);
           this.particles.muzzleFlash(out.fired.x, out.fired.y, out.fired.angle);
         }
+        if (e.justDetected) {
+          e.justDetected = false;
+          this._onPlayerSpotted(e);
+        }
       }
       // sweep fully-sunk wrecks
       this.enemies = this.enemies.filter((e) => !(e.ship.dead && e.ship.sinkTime > 2.5));
@@ -178,6 +246,25 @@ export class Game {
         this.waveDelay = 0;
       }
     }
+
+    // --- explosive barrels ---
+    for (const b of this.barrels) {
+      b.update(dt);
+      if (!b.dead && b.fuse < 0) this._explodeBarrel(b);
+      // hulls nudge barrels aside
+      if (b.dead) continue;
+      const ships = [p, ...this.enemies.map((e) => e.ship)];
+      for (const s of ships) {
+        if (s.dead) continue;
+        const d = dist(b.x, b.y, s.x, s.y);
+        const minD = s.stats.wid * 0.8 + 12;
+        if (d < minD && d > 0.001) {
+          const nx = (b.x - s.x) / d, ny = (b.y - s.y) / d;
+          b.vx += nx * 90; b.vy += ny * 90;
+        }
+      }
+    }
+    this.barrels = this.barrels.filter((b) => !b.dead);
 
     // --- cannonballs ---
     for (const b of this.balls) {
@@ -203,10 +290,11 @@ export class Game {
     }
 
     this.particles.update(dt);
+    this.gulls.update(dt, p.x, p.y);
 
     // --- camera: lead slightly in the direction of travel ---
     const lookX = p.x + p.vx * 0.4 - this.canvas.width / 2;
-    const lookY = p.y + p.vy * 0.4 - this.canvas.height / 2;
+    const lookY = p.y + p.vy * 0.4 - (this.canvas.height / 2) / TILT_C;
     const ease = 1 - Math.exp(-3.5 * dt);
     this.cam.x = lerp(this.cam.x, lookX, ease);
     this.cam.y = lerp(this.cam.y, lookY, ease);
@@ -275,7 +363,8 @@ export class Game {
           const s = e.ship;
           if (s.dead || dist(b.x, b.y, s.x, s.y) > s.stats.wid * 0.95) continue;
           b.dead = true;
-          const dealt = s.takeDamage(b.damage);
+          s.takeDamage(b.damage);
+          e.markDetected(1); // a volley from the mist is a rude introduction
           this.particles.woodHit(b.x, b.y);
           if (s.dead) this._enemySunk(e);
           break;
@@ -294,6 +383,17 @@ export class Game {
         }
       }
 
+      // vs powder barrels — anyone's shot lights them up
+      if (!b.dead) {
+        for (const bar of this.barrels) {
+          if (!bar.dead && dist(b.x, b.y, bar.x, bar.y) < 16) {
+            b.dead = true;
+            this._explodeBarrel(bar);
+            break;
+          }
+        }
+      }
+
       // vs rocks
       if (!b.dead) {
         for (const r of this.rocks) {
@@ -303,6 +403,35 @@ export class Game {
             break;
           }
         }
+      }
+    }
+  }
+
+  _explodeBarrel(barrel) {
+    if (barrel.dead) return;
+    barrel.dead = true;
+    this.particles.explosion(barrel.x, barrel.y, 1.5);
+    this.shake = Math.max(this.shake, 5);
+
+    // blast damage to every hull in range — yours included, so aim carefully
+    const p = this.player;
+    if (!p.dead && dist(barrel.x, barrel.y, p.x, p.y) < BARREL_RADIUS) {
+      this._hitShip(p, BARREL_DAMAGE, 'barrel');
+    }
+    for (const e of this.enemies) {
+      const s = e.ship;
+      if (s.dead || dist(barrel.x, barrel.y, s.x, s.y) > BARREL_RADIUS) continue;
+      s.takeDamage(BARREL_DAMAGE);
+      e.markDetected(1);
+      this.particles.woodHit(s.x, s.y);
+      if (s.dead) this._enemySunk(e);
+    }
+
+    // chain reaction: light the fuses of neighbouring barrels
+    for (const other of this.barrels) {
+      if (!other.dead && other !== barrel && other.fuse === 0 &&
+          dist(barrel.x, barrel.y, other.x, other.y) < BARREL_RADIUS) {
+        other.fuse = rand(0.12, 0.3);
       }
     }
   }
@@ -470,20 +599,24 @@ export class Game {
       return;
     }
 
-    ctx.save();
-    ctx.translate(-cam.x, -cam.y);
-
+    const viewH = h / TILT_C;
     const inView = (x, y, m = 160) =>
-      x > cam.x - m && x < cam.x + w + m && y > cam.y - m && y < cam.y + h + m;
+      x > cam.x - m && x < cam.x + w + m && y > cam.y - m && y < cam.y + viewH + m;
 
-    for (const r of this.rocks) if (inView(r.x, r.y, r.r + 60)) r.draw(ctx, this.t);
-    for (const l of this.loot) if (inView(l.x, l.y)) l.draw(ctx, this.t);
+    // wakes and foam sit on the water, under every hull
+    drawParticles(ctx, this.particles.list, cam, 'low');
 
-    this.particles.draw(ctx);
+    // depth-sort everything that stands on the sea so nearer things overlap
+    const drawables = [];
+    const D = (y, fn) => drawables.push({ y, fn });
+
+    for (const r of this.rocks) if (inView(r.x, r.y, r.r + 80)) D(r.y, () => drawRock3D(ctx, r, this.t, cam));
+    for (const l of this.loot) if (inView(l.x, l.y)) D(l.y, () => drawLoot3D(ctx, l, this.t, cam));
+    for (const b of this.barrels) if (inView(b.x, b.y)) D(b.y, () => drawBarrel3D(ctx, b, this.t, cam));
 
     // remote players
     if (this.mode === 'multi' && this.net) {
-      for (const [id, rp] of this.net.players) {
+      for (const rp of this.net.players.values()) {
         const st = this.net.remoteState(rp);
         if (!st) continue;
         if (!rp.ship) {
@@ -501,20 +634,29 @@ export class Game {
         s.bob += 1 / 60;
         rp.render = s; // hit detection uses the rendered position
         if (inView(s.x, s.y)) {
-          drawShip(ctx, s, this.t);
+          D(s.y, () => drawShip3D(ctx, s, this.t, cam));
           if (!s.dead && s.sail > 0.15) this.particles.wake(s);
         }
       }
     }
 
-    for (const e of this.enemies) if (inView(e.ship.x, e.ship.y)) drawShip(ctx, e.ship, this.t);
-    drawShip(ctx, this.player, this.t);
+    for (const e of this.enemies) {
+      const s = e.ship;
+      if (inView(s.x, s.y)) D(s.y, () => drawShip3D(ctx, s, this.t, cam));
+    }
+    D(this.player.y, () => drawShip3D(ctx, this.player, this.t, cam));
 
-    for (const b of this.balls) if (inView(b.x, b.y)) b.draw(ctx);
+    drawables.sort((a, b) => a.y - b.y);
+    for (const d of drawables) d.fn();
 
-    ctx.restore();
+    for (const b of this.balls) if (inView(b.x, b.y)) drawBall3D(ctx, b, cam);
 
-    drawWorldEdge(ctx, cam, WORLD_SIZE, w, h);
+    // airborne smoke, sparks and debris drift over the hulls
+    drawParticles(ctx, this.particles.list, cam, 'high');
+
+    this.gulls.draw(ctx, cam, w, h);
+    drawCloudBorder(ctx, cam, this.t, w, h, WORLD_SIZE);
+
     this._drawMinimap(ctx, w, h);
     this.input.drawJoystick(ctx);
   }
@@ -527,8 +669,8 @@ export class Game {
     ctx.save();
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = 'rgba(5, 30, 50, 0.75)';
-    ctx.strokeStyle = 'rgba(255, 209, 102, 0.7)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(232, 240, 248, 0.85)'; // cloud-wall rim
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, TAU);
     ctx.fill();
@@ -543,8 +685,12 @@ export class Game {
     };
 
     for (const r of this.rocks) dot(r.x, r.y, '#5d6d7e', Math.max(1.5, r.r * scale));
+    for (const b of this.barrels) dot(b.x, b.y, '#e8743b', 1.6);
     for (const l of this.loot) dot(l.x, l.y, '#ffd166', 1.8);
-    for (const e of this.enemies) if (!e.ship.dead) dot(e.ship.x, e.ship.y, '#ff4d4d', e.ship.type === 'galleon' ? 4 : 2.5);
+    // undetected captains stay hidden — the map only shows ships that know you're here
+    for (const e of this.enemies) {
+      if (!e.ship.dead && e.detected) dot(e.ship.x, e.ship.y, '#ff4d4d', e.ship.type === 'galleon' ? 4 : 2.5);
+    }
     if (this.mode === 'multi' && this.net) {
       for (const rp of this.net.players.values()) {
         if (rp.render && !rp.dead) dot(rp.render.x, rp.render.y, '#ff4d4d', 3);

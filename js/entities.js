@@ -1,5 +1,6 @@
-// Sea Raiders — ships, cannonballs, loot, rocks, particles (MIT)
-import { TAU, clamp, lerp, rand, angleDiff } from './utils.js';
+// Sea Raiders — ships, cannonballs, loot, barrels, rocks, particles (MIT)
+// Simulation/state lives here; all drawing is in render3d.js.
+import { TAU, clamp, lerp, rand } from './utils.js';
 
 // ============================================================ Ship
 
@@ -33,6 +34,7 @@ export class Ship {
     this.sinkTime = 0;        // grows after death for sinking animation
     this.wakePhase = rand(TAU);
     this.bob = rand(TAU);     // gentle idle bobbing phase
+    this.alert = 0;           // "!" indicator when this ship spots the player
 
     this.palette = {
       hull: '#6d4524', hullDark: '#4e2f15', deck: '#9c7044',
@@ -53,6 +55,7 @@ export class Ship {
     this.flash = Math.max(0, this.flash - dt * 4);
     this.braceCd = Math.max(0, this.braceCd - dt);
     this.braceTimer = Math.max(0, this.braceTimer - dt);
+    this.alert = Math.max(0, this.alert - dt);
 
     if (control.brace && this.braceCd <= 0) {
       this.braceTimer = BRACE_DURATION;
@@ -117,148 +120,6 @@ export class Ship {
   }
 }
 
-/** Procedural top-down sailing ship. All "art" is canvas paths — zero assets. */
-export function drawShip(ctx, s, t) {
-  const { len, wid } = s.stats;
-  const p = s.palette;
-  const sinking = s.dead ? clamp(s.sinkTime / 2.2, 0, 1) : 0;
-  if (sinking >= 1) return;
-
-  const bobY = Math.sin(s.bob * 1.7) * 1.5;
-
-  ctx.save();
-  ctx.translate(s.x, s.y + bobY);
-  if (sinking > 0) {
-    ctx.globalAlpha = 1 - sinking;
-    ctx.scale(1 - sinking * 0.35, 1 - sinking * 0.35);
-    ctx.rotate(sinking * 0.6);
-  }
-  ctx.rotate(s.heading);
-
-  const L = len / 2, W = wid / 2;
-
-  // shadow on the water
-  ctx.fillStyle = 'rgba(0,20,35,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(2, 4, L * 1.02, W * 1.15, 0, 0, TAU);
-  ctx.fill();
-
-  // hull — pointed bow (+x), rounded stern
-  ctx.fillStyle = s.flash > 0.5 ? '#ffffff' : p.hull;
-  ctx.strokeStyle = p.hullDark;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(L, 0);
-  ctx.quadraticCurveTo(L * 0.45, -W * 1.15, -L * 0.55, -W);
-  ctx.quadraticCurveTo(-L * 1.05, -W * 0.55, -L * 1.05, 0);
-  ctx.quadraticCurveTo(-L * 1.05, W * 0.55, -L * 0.55, W);
-  ctx.quadraticCurveTo(L * 0.45, W * 1.15, L, 0);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  // deck inset with plank lines
-  ctx.fillStyle = s.flash > 0.5 ? '#ffffff' : p.deck;
-  ctx.beginPath();
-  ctx.moveTo(L * 0.78, 0);
-  ctx.quadraticCurveTo(L * 0.38, -W * 0.82, -L * 0.5, -W * 0.68);
-  ctx.quadraticCurveTo(-L * 0.85, -W * 0.4, -L * 0.85, 0);
-  ctx.quadraticCurveTo(-L * 0.85, W * 0.4, -L * 0.5, W * 0.68);
-  ctx.quadraticCurveTo(L * 0.38, W * 0.82, L * 0.78, 0);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-  ctx.lineWidth = 1;
-  for (let i = -2; i <= 2; i++) {
-    ctx.beginPath();
-    ctx.moveTo(-L * 0.8, i * W * 0.28);
-    ctx.lineTo(L * 0.6, i * W * 0.28);
-    ctx.stroke();
-  }
-
-  // cannon stubs along the gunwales
-  ctx.fillStyle = '#222';
-  const n = s.stats.cannons;
-  for (let i = 0; i < n; i++) {
-    const along = (i - (n - 1) / 2) * (L * 1.1 / Math.max(1, n - 1) || 0);
-    ctx.fillRect(along - 2, -W - 3, 4, 6);
-    ctx.fillRect(along - 2, W - 3, 4, 6);
-  }
-
-  // masts + sails: square sails billow with sail amount, luff when idle
-  const billow = 0.25 + s.sail * 0.75;
-  const flutter = Math.sin(t * 6 + s.wakePhase) * (1 - s.sail) * 2;
-  const masts = s.stats.len > 80 ? [-L * 0.45, 0.0, L * 0.42] : s.stats.len > 56 ? [-L * 0.35, L * 0.35] : [0];
-  for (const mx of masts) {
-    const sw = W * 1.7;
-    ctx.fillStyle = p.sail;
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(mx, -sw / 2);
-    ctx.quadraticCurveTo(mx - 9 * billow - flutter, 0, mx, sw / 2);
-    ctx.quadraticCurveTo(mx - 3 * billow, 0, mx, -sw / 2);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    // mast cap
-    ctx.fillStyle = p.hullDark;
-    ctx.beginPath();
-    ctx.arc(mx, 0, 2.5, 0, TAU);
-    ctx.fill();
-  }
-
-  // stern flag, streaming aft
-  ctx.strokeStyle = p.flag;
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(-L * 1.0, 0);
-  const wave = Math.sin(t * 8 + s.wakePhase) * 3;
-  ctx.quadraticCurveTo(-L * 1.0 - 8, wave, -L * 1.0 - 15, -wave);
-  ctx.stroke();
-
-  // bow trim
-  ctx.strokeStyle = p.trim;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(L * 0.96, 0);
-  ctx.lineTo(L * 0.55, 0);
-  ctx.stroke();
-
-  ctx.restore();
-
-  // brace shield ring
-  if (s.braced && !s.dead) {
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    ctx.globalAlpha = 0.5 + Math.sin(t * 10) * 0.18;
-    ctx.strokeStyle = '#7ed6ff';
-    ctx.lineWidth = 3.5;
-    ctx.setLineDash([10, 7]);
-    ctx.lineDashOffset = -t * 40;
-    ctx.beginPath();
-    ctx.arc(0, 0, len * 0.72, 0, TAU);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // health bar + name (skip for healthy unnamed ships to reduce clutter)
-  if (!s.dead && (s.hp < s.maxHp || s.name)) {
-    const bw = 46;
-    const yy = s.y - s.stats.len * 0.75;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(s.x - bw / 2, yy, bw, 5);
-    ctx.fillStyle = s.hp / s.maxHp > 0.35 ? '#2ed573' : '#e84118';
-    ctx.fillRect(s.x - bw / 2, yy, bw * (s.hp / s.maxHp), 5);
-    if (s.name) {
-      ctx.fillStyle = '#f5e9d0';
-      ctx.font = 'bold 12px Trebuchet MS';
-      ctx.textAlign = 'center';
-      ctx.fillText(s.name, s.x, yy - 5);
-    }
-  }
-}
-
 // ============================================================ Cannonball
 
 const BALL_SPEED = 420;
@@ -280,26 +141,6 @@ export class Cannonball {
     this.y += this.vy * dt;
     this.life -= dt;
     if (this.life <= 0) this.dead = true;
-  }
-
-  draw(ctx) {
-    // parabolic flight: ball rises then falls, shadow stays on the water
-    const prog = 1 - this.life / this.maxLife;
-    const height = Math.sin(prog * Math.PI) * 14;
-
-    ctx.fillStyle = 'rgba(0,20,35,0.35)';
-    ctx.beginPath();
-    ctx.arc(this.x, this.y + 3, 3.5, 0, TAU);
-    ctx.fill();
-
-    ctx.fillStyle = '#1d1d1d';
-    ctx.beginPath();
-    ctx.arc(this.x, this.y - height, 4.5, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(this.x - 1.5, this.y - height - 1.5, 1.6, 0, TAU);
-    ctx.fill();
   }
 }
 
@@ -327,41 +168,30 @@ export class Loot {
     this.bob += dt * 2;
     if (this.age > 25) this.dead = true; // drifts away eventually
   }
+}
 
-  draw(ctx, t) {
-    const by = Math.sin(this.bob) * 3;
-    ctx.save();
-    ctx.translate(this.x, this.y + by);
-    if (this.age > 21) ctx.globalAlpha = Math.max(0, 1 - (this.age - 21) / 4);
+// ============================================================ Barrel (explosive)
 
-    if (this.kind === 'gold') {
-      // floating crate of coins
-      ctx.fillStyle = '#7a5230';
-      ctx.strokeStyle = '#4e2f15';
-      ctx.lineWidth = 2;
-      ctx.save();
-      ctx.rotate(Math.sin(this.bob * 0.7) * 0.15);
-      ctx.fillRect(-9, -9, 18, 18);
-      ctx.strokeRect(-9, -9, 18, 18);
-      ctx.strokeStyle = '#caa64f';
-      ctx.beginPath();
-      ctx.moveTo(-9, 0); ctx.lineTo(9, 0);
-      ctx.moveTo(0, -9); ctx.lineTo(0, 9);
-      ctx.stroke();
-      ctx.restore();
-    } else {
-      // glowing barrel powerup
-      const glow = 0.5 + Math.sin(t * 5 + this.bob) * 0.3;
-      ctx.fillStyle = `rgba(255, 209, 102, ${glow * 0.35})`;
-      ctx.beginPath();
-      ctx.arc(0, 0, 17, 0, TAU);
-      ctx.fill();
-      ctx.font = '18px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(LOOT_KINDS[this.kind].icon, 0, 1);
-    }
-    ctx.restore();
+export const BARREL_RADIUS = 110;  // blast radius
+export const BARREL_DAMAGE = 25;
+
+export class Barrel {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.vx = 0; this.vy = 0;
+    this.bob = rand(TAU);
+    this.fuse = 0;       // > 0 means lit (chain reaction delay)
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.bob += dt * 2;
+    // drift from being nudged by hulls, damped by the water
+    const d = Math.exp(-1.8 * dt);
+    this.vx *= d; this.vy *= d;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    if (this.fuse > 0) this.fuse -= dt;
   }
 }
 
@@ -370,44 +200,7 @@ export class Loot {
 export class Rock {
   constructor(x, y, r) {
     this.x = x; this.y = y; this.r = r;
-    // pre-bake a jagged outline
-    this.pts = [];
-    const n = 9 + ((r / 8) | 0);
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * TAU;
-      this.pts.push({ a, d: r * rand(0.75, 1.1) });
-    }
-  }
-
-  draw(ctx, t) {
-    ctx.save();
-    ctx.translate(this.x, this.y);
-
-    // foam ring lapping at the base
-    ctx.strokeStyle = 'rgba(220, 240, 255, 0.35)';
-    ctx.lineWidth = 5 + Math.sin(t * 2 + this.x) * 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.r + 6, 0, TAU);
-    ctx.stroke();
-
-    ctx.fillStyle = '#5d6d7e';
-    ctx.strokeStyle = '#34495e';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    this.pts.forEach((p, i) => {
-      const x = Math.cos(p.a) * p.d, y = Math.sin(p.a) * p.d;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // highlight facet
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.beginPath();
-    ctx.ellipse(-this.r * 0.25, -this.r * 0.3, this.r * 0.45, this.r * 0.3, -0.5, 0, TAU);
-    ctx.fill();
-    ctx.restore();
+    // faceted mesh is built lazily by the renderer (rock._mesh)
   }
 }
 
@@ -419,8 +212,10 @@ export class Particles {
   spawn(x, y, opts = {}) {
     this.list.push({
       x, y,
+      z: opts.z ?? 0,
       vx: opts.vx ?? rand(-30, 30),
       vy: opts.vy ?? rand(-30, 30),
+      vz: opts.vz ?? 0,
       life: opts.life ?? 0.8,
       maxLife: opts.life ?? 0.8,
       size: opts.size ?? 4,
@@ -456,6 +251,7 @@ export class Particles {
         vx: Math.cos(ship.heading + rand(-1, 1)) * 50,
         vy: Math.sin(ship.heading + rand(-1, 1)) * 50,
         life: 0.4, size: 3, color: '235,250,255', alpha: 0.7,
+        z: 4, vz: rand(20, 50),
       });
     }
   }
@@ -467,6 +263,7 @@ export class Particles {
         vx: Math.cos(a) * rand(60, 180), vy: Math.sin(a) * rand(60, 180),
         life: rand(0.15, 0.4), size: rand(3, 6),
         color: i < 2 ? '255,200,80' : '160,160,160', alpha: 0.9, grow: 14, drag: 4,
+        z: 8, vz: rand(0, 30),
       });
     }
   }
@@ -475,9 +272,10 @@ export class Particles {
     for (let i = 0; i < 8; i++) {
       const a = rand(TAU);
       this.spawn(x, y, {
-        vx: Math.cos(a) * rand(20, 90), vy: Math.sin(a) * rand(20, 90) - 40,
+        vx: Math.cos(a) * rand(20, 90), vy: Math.sin(a) * rand(20, 90),
         life: rand(0.3, 0.6), size: rand(2, 5),
         color: '210,240,255', alpha: 0.85, drag: 2,
+        vz: rand(40, 110),
       });
     }
   }
@@ -489,6 +287,7 @@ export class Particles {
         vx: Math.cos(a) * rand(40, 150), vy: Math.sin(a) * rand(40, 150),
         life: rand(0.3, 0.7), size: rand(2, 4),
         color: i < 6 ? '150,100,50' : '255,180,80', alpha: 0.95, drag: 3,
+        z: 10, vz: rand(20, 90),
       });
     }
   }
@@ -502,6 +301,7 @@ export class Particles {
         life: rand(0.4, 1.1), size: rand(4, 10) * scale, grow: 8,
         color: i < 8 ? '255,170,60' : i < 14 ? '255,90,40' : '90,90,90',
         alpha: 0.95, drag: 2.5,
+        z: 5, vz: rand(30, 160) * scale,
       });
     }
   }
@@ -510,9 +310,10 @@ export class Particles {
   damageSmoke(ship) {
     if (ship.dead || ship.hp / ship.maxHp > 0.4 || Math.random() > 0.25) return;
     this.spawn(ship.x + rand(-8, 8), ship.y + rand(-8, 8), {
-      vx: rand(-12, 12), vy: rand(-26, -10),
+      vx: rand(-12, 12), vy: rand(-8, 8),
       life: rand(0.8, 1.6), size: rand(4, 8), grow: 10,
       color: '60,60,60', alpha: 0.5, drag: 1,
+      z: 12, vz: rand(25, 50),
     });
   }
 
@@ -526,16 +327,13 @@ export class Particles {
       p.vx *= d; p.vy *= d;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+      // simple ballistic height: debris arcs up and falls back to the water
+      if (p.z > 0 || p.vz !== 0) {
+        p.vz -= 260 * dt;
+        p.z = Math.max(0, p.z + p.vz * dt);
+        if (p.z === 0 && p.vz < 0) p.vz = 0;
+      }
       p.size += p.grow * dt;
-    }
-  }
-
-  draw(ctx) {
-    for (const p of this.list) {
-      ctx.fillStyle = `rgba(${p.color},${(p.life / p.maxLife) * p.alpha})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, TAU);
-      ctx.fill();
     }
   }
 }
