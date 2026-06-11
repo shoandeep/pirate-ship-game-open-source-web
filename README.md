@@ -19,10 +19,19 @@ tiny Node.js WebSocket server. MIT licensed.
 - **Attack & defend** — `FIRE` auto-aims a broadside at the nearest threat (both sides
   if nothing's near); `BRACE` cuts incoming damage by 60% for two seconds on a cooldown.
   Timing your brace against an enemy volley is the heart of a duel.
-- **Procedural art** — ships (hull, planked deck, billowing sails, streaming flag,
-  cannon ports), animated ocean with world-anchored wave glints, rocky islets with
-  lapping foam, cannonballs that arc with a shadow on the water, explosions, splinters,
-  smoke, splashes, screen shake.
+- **Low-poly 3D look, zero dependencies** — a tiny flat-shaded polygon engine
+  (`js/render3d.js`) runs on plain Canvas 2D. The camera looks down at the sea from
+  an angle, so you see full ship detail: faceted hulls, planked decks, raised
+  quarterdecks, gun ports, masts with billowing sails, streaming flags. Rocks are
+  shaded polygon crags, cannonballs arc in real height with shadows on the water,
+  and explosion debris flies ballistically.
+- **A living sea** — the world ends in a wall of drifting low-poly clouds, gulls
+  wheel overhead, explosive powder barrels float between the islets (shoot one for
+  an area blast — they chain-react, and the blast doesn't care whose hull is near).
+- **Detection & reinforcements** — enemy captains patrol blind and stay hidden from
+  your minimap until they spot you. Get seen and a **!** flashes over their mast,
+  nearby ships are alerted, and the first sighting of every wave whistles up
+  reinforcements that sail in out of the cloud wall.
 - **Wave survival with progression** — sloops, brigs, and boss galleons with a
   state-machine AI (patrol → chase → circle for a broadside → flee when crippled).
   Between waves, dock at the Port of Call and spend plundered gold on hull, cannons,
@@ -72,9 +81,10 @@ Set a custom port with `PORT=3000 npm start`.
 index.html          game shell + HUD/menus
 css/style.css       UI styling
 js/main.js          boot, menu wiring, game loop
-js/game.js          world: waves, combat, loot, camera, shop, minimap
-js/entities.js      ship physics & procedural rendering, cannonballs, loot, rocks, particles
-js/enemy.js         enemy captain AI + wave composition
+js/game.js          world: waves, combat, loot, barrels, camera, shop, minimap
+js/entities.js      simulation: ship physics, cannonballs, loot, barrels, rocks, particles
+js/render3d.js      low-poly 3D engine: projection, flat shading, ship/rock/cloud meshes
+js/enemy.js         enemy captain AI, detection, wave composition
 js/input.js         thumb joystick / mouse / keyboard
 js/water.js         animated procedural ocean
 js/net.js           multiplayer client (snapshot interpolation)

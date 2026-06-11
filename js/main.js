@@ -97,3 +97,6 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 ui.showMenu();
+
+// handy for debugging and modding from the console
+window.game = game;
