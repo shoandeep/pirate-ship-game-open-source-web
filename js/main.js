@@ -84,8 +84,13 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 1 / 20);
   last = now;
 
-  game.update(dt);
-  game.draw();
+  // a single bad frame must never kill the render loop
+  try {
+    game.update(dt);
+    game.draw();
+  } catch (err) {
+    console.error('frame error:', err);
+  }
 
   requestAnimationFrame(frame);
 }

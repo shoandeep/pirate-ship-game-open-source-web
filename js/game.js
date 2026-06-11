@@ -464,6 +464,12 @@ export class Game {
 
     drawWater(ctx, cam, this.t, w, h);
 
+    // before a voyage starts there's no world yet — the menu sits on live ocean
+    if (!this.player) {
+      this.t += 1 / 60;
+      return;
+    }
+
     ctx.save();
     ctx.translate(-cam.x, -cam.y);
 
